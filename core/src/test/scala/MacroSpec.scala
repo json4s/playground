@@ -4,17 +4,32 @@ import org.specs2.mutable.Specification
 case class Junk(in:Int, in2:String)
 case class ThingWithJunk(name:String, junk:Junk)
 case class Crazy(name:String,thg:ThingWithJunk)
+case class WithOption(in:Int,opt:Option[String])
+case class OptionOption(in:Option[Option[Int]])
 
 class MacroSpec extends Specification {
+  val refJunk = Junk(2,"cats")
+  val refJunkDict = Map("in"->refJunk.in.toString,"in2"->refJunk.in2)
+  
+  
   "Macros" should {
     "Give me a hello world!" in {
 	  Macros.hello must_== "Hello world!"
 	}
 	
 	"Generate a Junk" in {
-	  val stuff = Map("in"->"2","in2"->"cats")
-	  Macros.classBuilder[Junk](stuff) must_== Junk(2,"cats")
+	  Macros.classBuilder[Junk](refJunkDict) must_== refJunk
 	}
+	
+	"Generate a recursive Option" in {
+	  val expected = OptionOption(Some(Some(5)))
+	  val stuff = Map("in"->"5")
+	  
+	  val result = Macros.classBuilder[OptionOption](stuff)
+	  
+	  result must_== expected
+	}
+	
 	
 	"Generate a ThingWithJunk" in {
 	  val expected = ThingWithJunk("Bob",Junk(2,"SomeJunk..."))
@@ -34,6 +49,20 @@ class MacroSpec extends Specification {
 	  val result = Macros.classBuilder[Crazy](stuff)
 	  result must_== expected
 	}
+	
+	
+	"Instance a case class with an Option" in {
+	  val expected = WithOption(2,Some("Pizza pockets forever!"))
+	  val params = Map("in"->"2","opt"->"Pizza pockets forever!")
+	  Macros.classBuilder[WithOption](params) must_== expected
+	}
+	
+	"Instance a case class with a missing Option" in {
+	  val expected = WithOption(2,None)
+	  val params = Map("in"->"2")
+	  Macros.classBuilder[WithOption](params) must_== expected
+	}
+	
   }
 
 }

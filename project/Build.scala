@@ -11,7 +11,9 @@ object BuildSettings {
 
     libraryDependencies <+= scalaVersion("org.scala-lang" % "scala-reflect" % _),
 	
-	scalacOptions ++= Seq("-Ymacro-debug-lite", "-unchecked", "-deprecation", "-feature", "-language:implicitConversions")
+	scalacOptions ++= Seq("-unchecked", "-deprecation", "-feature", "-language:implicitConversions")
+	
+	//scalacOptions += "-Ymacro-debug-lite"
   )
 }
 
