@@ -4,6 +4,8 @@ import scala.reflect.macros.Context
 import scala.collection.mutable.{ListBuffer, Stack}
 
 
+class ParseException(message: String, cause: Exception) extends Exception(message, cause)
+
 object Macros {
   def hello = macro helloimpl
   def helloimpl(c: Context):c.Expr[String] = {
@@ -38,38 +40,55 @@ object Macros {
 	def LIT[U](x:U) = c.Expr[U](Literal(Constant(x)))
 	//def mkSome(t: Tree) = 
 	
-	def rparseInt(name:String)    = reify(getArg(LIT(name).splice,params.splice).toInt)
-	def rparseLong(name:String)   = reify(getArg(LIT(name).splice,params.splice).toLong)
-	def rparseFloat(name:String)  = reify(getArg(LIT(name).splice,params.splice).toFloat)
-	def rparseDouble(name:String) = reify(getArg(LIT(name).splice,params.splice).toDouble)
-	def rparseString(name:String) = reify(getArg(LIT(name).splice,params.splice))
-	
-	def tryFindTree(ty:Tree,els: Tree): Tree = {
-	  Try(
-        ty, 
-        List(
-	      CaseDef(
-		    Typed(
-		      Ident(nme.WILDCARD),
-		      Select(Select(Ident("java"),newTermName("util")),newTermName("NoSuchElementException"))
-            ),
-		    EmptyTree,
-		    els
-		  )
-	    ), 
-	    EmptyTree
-	  )
+	def rparseInt(iname:String)    = reify { val name = LIT(iname).splice
+	  try {
+		getArg(name,params.splice).toInt
+	  } catch {
+	    case e: java.lang.NumberFormatException => throw new ParseException(
+		s"Error parsing value '$name' to Int", e)
+	  }
 	}
 	
+	def rparseLong(iname:String)    = reify { val name = LIT(iname).splice
+	  try {
+		getArg(name,params.splice).toLong
+	  } catch {
+	    case e: java.lang.NumberFormatException => throw new ParseException(
+		s"Error parsing value '$name' to Long", e)
+	  }
+	}
+	
+	def rparseFloat(iname:String)    = reify { val name = LIT(iname).splice
+	  try {
+		getArg(name,params.splice).toFloat
+	  } catch {
+	    case e: java.lang.NumberFormatException => throw new ParseException(
+		s"Error parsing value '$name' to Float", e)
+	  }
+	}
+	
+	def rparseDouble(iname:String)    = reify { val name = LIT(iname).splice
+	  try {
+		getArg(name,params.splice).toDouble
+	  } catch {
+	    case e: java.lang.NumberFormatException => throw new ParseException(
+		s"Error parsing value '$name' to Double", e)
+	  }
+	}
+	
+	def rparseString(name:String) = reify(getArg(LIT(name).splice,params.splice))
+	
 	def rparseOption(tpe:Type,name:String):Tree = {
-	  val TypeRef(_,_,List(argTpe)) = tpe // Why did this quit working?
+	  // Cant come crom typeSymbol.typeSignature. Not the same!
+	  val TypeRef(_,_,List(argTpe)) = tpe
+	  reify{
+	    try{  // Expr is of type argTpe
+		  Some(c.Expr(buildObject(argTpe,name)).splice)
+		} catch {
+		  case _: java.util.NoSuchElementException => None
+		}
+	  }.tree
 	  
-	  val onErr: Tree = Select(Ident("scala"), newTermName("None"))
-	  
-	  val ty = Apply(Select(Select(Ident("scala"), newTermName("Some")), newTermName("apply")),  
-	    List(buildObject(argTpe,name)))
-		
-	  tryFindTree(ty,onErr)
 	}
 	
 	def buildObject(tpe: Type, name:String):Tree = {
@@ -82,17 +101,25 @@ object Macros {
 	  else if (tpe.erasure =:= typeOf[Option[Any]]) {
 	    rparseOption(tpe,name)
       }
+	  // Must be a complex object. Hopefully it can be instanced normally
 	  else {
 	    val sym = tpe.typeSymbol  
 	    val ctorM = tpe.member(nme.CONSTRUCTOR).asMethod
 	    val ctorParams = ctorM.paramss
-	    New(sym,(ctorParams(0).map { sym =>
+		
+		/* Will need to work here to deal with mutable objects
+		 * This tree will have to become part of a more complex
+		 * expression that tests for each param and applies it.
+		 * This same idea must be applied to optional params.
+		 */
+		
+	    New(sym,(ctorParams(0).map { sym => 
+		  // gen list of trees that eval to params
 	      val tpe = sym.typeSignature
 		  val compName = if(name != "") {
 		    name + "." + sym.name.decoded
 		  } else (sym.name.decoded) 
-		
-		  // Handle privlaged types such as options now..
+		  
 		  buildObject(tpe, compName)
 	    }):_*)
 	  }
