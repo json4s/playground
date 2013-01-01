@@ -7,26 +7,6 @@ import scala.collection.mutable.{ListBuffer, Stack}
 class ParseException(message: String, cause: Exception) extends Exception(message, cause)
 
 object Macros {
-  def hello = macro helloimpl
-  def helloimpl(c: Context):c.Expr[String] = {
-    import c.universe._
-  
-    c.Expr[String](Literal(Constant("Hello world!")))
-  }
-  
-  def inst[A] = macro instimpl[A]
-  def instimpl[A: c.WeakTypeTag](c: Context):c.Expr[A] = {
-    import c.universe._
-	
-	def LIT[U](x:U) = c.Expr[U](Literal(Constant(x)))
-	
-	val params = List(List(LIT(4).tree,LIT("Cats...").tree))
-	
-	val sym = weakTypeOf[A].typeSymbol
-	
-    val tree = New(sym,params(0):_*)
-	c.Expr[A](tree)
-  } 
   
   type ParamsTpe = Map[String,String]
   
@@ -107,21 +87,45 @@ object Macros {
 	    val ctorM = tpe.member(nme.CONSTRUCTOR).asMethod
 	    val ctorParams = ctorM.paramss
 		
-		/* Will need to work here to deal with mutable objects
-		 * This tree will have to become part of a more complex
-		 * expression that tests for each param and applies it.
-		 * This same idea must be applied to optional params.
-		 */
-		
-	    New(sym,(ctorParams(0).map { sym => 
+		// Create new object, and fill params with error catching expressions
+		// If param takes defaults, try to find the val in map, or call 
+		// default evaluation from its companion object
+	    New(sym,(ctorParams(0).zipWithIndex.map { case (pSym,index) => 
 		  // gen list of trees that eval to params
-	      val tpe = sym.typeSignature
+	      val pTpe = pSym.typeSignature
 		  val compName = if(name != "") {
-		    name + "." + sym.name.decoded
-		  } else (sym.name.decoded) 
+		    name + "." + pSym.name.decoded
+		  } else (pSym.name.decoded) 
 		  
-		  buildObject(tpe, compName)
+		  if (pSym.asTerm.isParamWithDefault) {
+		    //println(s"-------------------- $sym --------------------") //debug
+			reify {
+			  try {
+			    c.Expr(buildObject(pTpe, compName)).splice // splice in another obj tree
+			  } catch {
+			    case e: java.util.NoSuchElementException =>
+				  // Need to use the origional symbol.companionObj to get defaults
+				  // Would be better to find the generated TermNames if possible
+				  
+				  /* Tries to throw a "partially defined" optional param error.
+				   * This is not working. It catches when elements have names 
+				   * that are substrings of each other such as IN and INa
+				  if((params.splice).keys.map{ x=>
+				    println(s"Key: $x")
+				    x.startsWith(LIT(name).splice)
+				  }.reduce(_&&_)) throw e
+				  */
+				  
+				  c.Expr(Select(Ident(sym.companionSymbol),newTermName(
+				    "$lessinit$greater$default$" + (index+1).toString))
+				  ).splice
+			  }
+			}.tree
+		  } else buildObject(pTpe, compName) // Required
+		  
 	    }):_*)
+		// Here is where we need to populate mutable fields not in constructor
+		
 	  }
 	}
 	

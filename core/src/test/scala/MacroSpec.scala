@@ -7,16 +7,24 @@ case class ThingWithJunk(name:String, junk:Junk)
 case class Crazy(name:String,thg:ThingWithJunk)
 case class WithOption(in:Int,opt:Option[String])
 case class OptionOption(in:Option[Option[Int]])
+case class JunkWithDefault(in:Int, in2:String="Default...")
+
+class ClassWithDef(val in:Int=4) {
+  override def toString = s"ClassWithDef(in:$in)"
+  override def equals(obj:Any) = obj match {
+	  case a:ClassWithDef => a.in == in
+	  case _ => false
+  }
+}
+
+case class ObjWithDefJunk(name:String, junk:Junk=Junk(-1,"Default"))
 
 class MacroSpec extends Specification {
   val refJunk = Junk(2,"cats")
   val refJunkDict = Map("in"->refJunk.in.toString,"in2"->refJunk.in2)
   
   "Macros" should {
-    "Give me a hello world!" in {
-	  Macros.hello must_== "Hello world!"
-	}
-	
+    
 	"Generate a Junk" in {
 	  Macros.classBuilder[Junk](refJunkDict) must_== refJunk
 	}
@@ -24,22 +32,6 @@ class MacroSpec extends Specification {
 	"Generate a MutableJunk" in {
 	  Macros.classBuilder[MutableJunk](refJunkDict) must_== MutableJunk(2,"cats")
 	}
-	
-	"Throw ParseException with a bad map value for 'in'" in {
-	  Macros.classBuilder[Junk](Map("in"->"2ffds","in2"->"cats")
-		) must throwA[ParseException](message="Error parsing value 'in' to Int")
-	}
-	
-	"Generate a recursive Option" in {
-	  val expected = OptionOption(Some(Some(5)))
-	  val stuff = Map("in"->"5")
-	  
-	  val result = Macros.classBuilder[OptionOption](stuff)
-	  
-	  result must_== expected
-	}
-	
-	
 	"Generate a ThingWithJunk" in {
 	  val expected = ThingWithJunk("Bob",Junk(2,"SomeJunk..."))
 	  val stuff = Map("name"->expected.name,"junk.in"->expected.junk.in.toString,
@@ -59,6 +51,43 @@ class MacroSpec extends Specification {
 	  result must_== expected
 	}
 	
+	"Created ClassWithDef with param" in {
+	  Macros.classBuilder[ClassWithDef](Map("in"->"1")) must_== (new ClassWithDef(1))
+	}
+	
+	"Created ClassWithDef without param" in {
+	  Macros.classBuilder[ClassWithDef](Map(""->"")) must_== (new ClassWithDef)
+	}
+	
+	"Generate a JunkWithDefault with a value" in {
+	  var expected = JunkWithDefault(refJunk.in,refJunk.in2)
+	  Macros.classBuilder[JunkWithDefault](refJunkDict) must_== expected
+	}
+	
+	"Generate a JunkWithDefault without a value" in {
+	  var expected = JunkWithDefault(refJunk.in)
+	  Macros.classBuilder[JunkWithDefault](Map("in"->"2")) must_== expected
+	}
+	"Created ObjWithDefJunk without junk" in {
+	  val expected = ObjWithDefJunk("Name")
+	  val map = Map("name"->"Name")
+	  Macros.classBuilder[ObjWithDefJunk](map) must_== expected
+	}
+	
+	"Created ObjWithDefJunk with provided junk" in {
+	  val expected = ObjWithDefJunk("Name",Junk(2,"Provided"))
+	  val map = Map("name"->"Name","junk.in"->"2","junk.in2"->"Provided")
+	  Macros.classBuilder[ObjWithDefJunk](map) must_== expected
+	}
+	
+	"Generate a recursive Option" in {
+	  val expected = OptionOption(Some(Some(5)))
+	  val stuff = Map("in"->"5")
+	  
+	  val result = Macros.classBuilder[OptionOption](stuff)
+	  
+	  result must_== expected
+	}
 	
 	"Instance a case class with an Option" in {
 	  val expected = WithOption(2,Some("Pizza pockets forever!"))
@@ -72,6 +101,10 @@ class MacroSpec extends Specification {
 	  Macros.classBuilder[WithOption](params) must_== expected
 	}
 	
+	"Throw ParseException with a bad map value for 'in'" in {
+	  Macros.classBuilder[Junk](Map("in"->"2ffds","in2"->"cats")
+		) must throwA[ParseException](message="Error parsing value 'in' to Int")
+	}
   }
 
 }
