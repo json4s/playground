@@ -33,39 +33,104 @@ object Macros {
 	in
   }
   
-  def classBuilder[A](params: ParamsTpe)(implicit dtf:DateFormat) = macro classbuilder[A]
-  def classbuilder[A: c.WeakTypeTag](c: Context)(params: c.Expr[ParamsTpe])(dtf:c.Expr[DateFormat]):c.Expr[A] = {
+  def classBuilder[A](params: ParamsTpe,name:String)(implicit dtf:DateFormat) = macro classbuilder[A]
+  def classbuilder[A: c.WeakTypeTag](c: Context)(params: c.Expr[ParamsTpe],name:c.Expr[String])
+									(dtf:c.Expr[DateFormat]):c.Expr[A] = {
     import c.universe._
+	import Flag._
 	
 	def LIT[U](x:U) = c.Expr[U](Literal(Constant(x)))
+	def CONCAT(a:c.Expr[String],b:c.Expr[String]) = reify{a.splice+b.splice}
 	
 	// Problem... buildObject cannot work for lists etc because the length is 
 	// not known at compile time. buildObject needs compile time known names...
-	def rparseList(tpe:Type,iname:String):Tree = {
+	def rparseList(tpe:Type,name:c.Expr[String]):Tree = {
 	  val TypeRef(_,_,List(argTpe)) = tpe
-	  /*
-	  reify {  val name = LIT(iname).splice
-	    var list:List[Any] = Nil
-	    def lstBuild(index:Int) {
-		  try {
-		    list = c.Expr(buildObject(argTpe,name)).splice :: list
-			lstBuild(index+1)
-		  } catch {
-		    case _: Throwable => list.reverse
-		  }
-		}
-	  }.tree
-	  */
-	  reify { 4::Nil }.tree
+	  
+	  /*  The Expression below comes for this block, with the AppliedTypeTree
+	   *  terms changed and a name concantation added
+	   * reify {
+       *   def lstBuild(index:Int,lst:List[Int]):List[Int] = {
+       *     try {
+       *       lstBuild(index+1,4::lst)
+       *     } catch {
+       *       case _: java.util.NoSuchElementException => lst.reverse
+       *     }
+       *   }
+       *   lstBuild(0,Nil)
+       * }
+	   */
+	   
+      //c.Expr(
+        Block(
+          List(
+    	    DefDef(Modifiers(), 
+	          newTermName("lstBuild"), 
+		      List(), 
+              List(
+		        List(
+                  ValDef(
+			        Modifiers(PARAM), 
+			        newTermName("index"), 
+                    Ident(typeOf[Int].typeSymbol), 
+                    EmptyTree
+                  ), 
+                  ValDef(
+                    Modifiers(PARAM), 
+                    newTermName("lst"), 
+                    AppliedTypeTree(Ident(newTypeName("List")), List(Ident(argTpe.typeSymbol))), 
+                    EmptyTree
+                  )
+                )
+              ), 
+              AppliedTypeTree(Ident(newTypeName("List")), List(Ident(argTpe.typeSymbol))),
+             // The function block
+              Try(
+                Apply(
+                  Ident(newTermName("lstBuild")),
+                  List(
+                    Apply(
+                      Select(Ident(newTermName("index")), newTermName("$plus")), List(Literal(Constant(1)))
+                    ), 
+                    Block(
+                      List(EmptyTree),
+                      Apply(
+                        Select(Ident(newTermName("lst")), newTermName("$colon$colon")), 
+				  
+                        List(
+                          buildObject(
+                            argTpe,c.Expr[String](Apply(
+                              Select(name.tree, newTermName("$plus")), List(Ident(newTermName("index")))
+                            ))
+                          )
+                        )
+                      ) 
+                    ) // Block
+                  )
+                ), 	// Apply
+                List(
+                  CaseDef(
+                    Typed(Ident(nme.WILDCARD), Ident(typeOf[java.util.NoSuchElementException].typeSymbol)), 
+                    EmptyTree,
+                    Select(Ident(newTermName("lst")), newTermName("reverse"))
+                  )
+                ), 
+                EmptyTree    // Would have been a finally bock?
+              )
+            )
+          ),
+          Apply(Ident(newTermName("lstBuild")), List(Literal(Constant(0)), reify{Nil}.tree))
+        )  // Block
+     // ).tree
 	} 
 	
-	def rparseDate(iname:String)   = reify { 
-	  val name = LIT(iname).splice
+	def rparseDate(iname:c.Expr[String])   = reify { 
+	  val name = iname.splice
 	  
 	  (dtf.splice).parse(getArg(name,params.splice))
 	}
 	
-	def rparseInt(iname:String)    = reify { val name = LIT(iname).splice
+	def rparseInt(iname:c.Expr[String])    = reify { val name = iname.splice
 	  try {
 		getArg(name,params.splice).toInt
 	  } catch {
@@ -74,7 +139,7 @@ object Macros {
 	  }
 	}
 	
-	def rparseLong(iname:String)    = reify { val name = LIT(iname).splice
+	def rparseLong(iname:c.Expr[String])    = reify { val name = iname.splice
 	  try {
 		getArg(name,params.splice).toLong
 	  } catch {
@@ -83,7 +148,7 @@ object Macros {
 	  }
 	}
 	
-	def rparseFloat(iname:String)    = reify { val name = LIT(iname).splice
+	def rparseFloat(iname:c.Expr[String])    = reify { val name = iname.splice
 	  try {
 		getArg(name,params.splice).toFloat
 	  } catch {
@@ -92,7 +157,7 @@ object Macros {
 	  }
 	}
 	
-	def rparseDouble(iname:String)    = reify { val name = LIT(iname).splice
+	def rparseDouble(iname:c.Expr[String])    = reify { val name = iname.splice
 	  try {
 		getArg(name,params.splice).toDouble
 	  } catch {
@@ -101,9 +166,11 @@ object Macros {
 	  }
 	}
 	
-	def rparseString(name:String) = reify(getArg(LIT(name).splice,params.splice))
+	def rparseString(name:c.Expr[String]) = reify{
+	  getArg(name.splice,params.splice)
+	}
 	
-	def rparseOption(tpe:Type,name:String):Tree = {
+	def rparseOption(tpe:Type,name:c.Expr[String]):Tree = {
 	  // Cant come crom typeSymbol.typeSignature. Not the same!
 	  val TypeRef(_,_,List(argTpe)) = tpe
 	  reify{
@@ -116,7 +183,7 @@ object Macros {
 	  
 	}
 	
-	def buildObject(tpe: Type, name:String):Tree = {
+	def buildObject(tpe: Type, name:c.Expr[String]):Tree = {
 	  if      (tpe =:= typeOf[Int])    { rparseInt(name).tree    }
 	  else if (tpe =:= typeOf[Long])   { rparseLong(name).tree   }
 	  else if (tpe =:= typeOf[Float])  { rparseFloat(name).tree  }
@@ -142,9 +209,7 @@ object Macros {
 	    New(sym,(ctorParams(0).zipWithIndex.map { case (pSym,index) => 
 		  // gen list of trees that eval to params
 	      val pTpe = pSym.typeSignature
-		  val compName = if(name != "") {
-		    name + "." + pSym.name.decoded
-		  } else (pSym.name.decoded) 
+		  val compName = CONCAT(CONCAT(name,LIT(".")),LIT(pSym.name.decoded))
 		  
 		  if (pSym.asTerm.isParamWithDefault) {
 		    //println(s"-------------------- $sym --------------------") //debug
@@ -180,6 +245,6 @@ object Macros {
 	
     val tpe = weakTypeOf[A]
 	
-	c.Expr[A](buildObject(tpe,""))
+	c.Expr[A](buildObject(tpe,name))
   }
 }
