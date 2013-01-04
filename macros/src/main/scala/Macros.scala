@@ -3,6 +3,12 @@ import scala.reflect.macros.Context
 
 import scala.collection.mutable.{ListBuffer, Stack}
 
+import java.text.SimpleDateFormat
+import java.util.Date
+
+class DateFormat(fmt:String) extends SimpleDateFormat(fmt)
+//implicit val defaultDateFormat = new java.text.SimpleDateFormat("EEE MMM d HH:mm:ss zzz yyyy")
+
 
 class ParseException(message: String, cause: Exception) extends Exception(message, cause)
 
@@ -12,13 +18,52 @@ object Macros {
   
   def getArg(name:String, in:ParamsTpe) = in(name)
   
+  def tester(in1:Int)(implicit in: Int) = macro testerimpl
+  def testerimpl(c:Context)(in1:c.Expr[Int])(in:c.Expr[Int]):c.Expr[Int] = {
+    import c.universe._
+	import Flag._
+	
+	def cats(in:Tree):Tree = {
+	  val in2 = c.Expr[Int](in)
+	  reify {
+	    in2.splice*in2.splice
+	  }.tree
+	}
+	
+	in
+  }
   
-  def classBuilder[A](params: ParamsTpe) = macro classbuilder[A]
-  def classbuilder[A: c.WeakTypeTag](c: Context)(params: c.Expr[ParamsTpe]):c.Expr[A] = {
+  def classBuilder[A](params: ParamsTpe)(implicit dtf:DateFormat) = macro classbuilder[A]
+  def classbuilder[A: c.WeakTypeTag](c: Context)(params: c.Expr[ParamsTpe])(dtf:c.Expr[DateFormat]):c.Expr[A] = {
     import c.universe._
 	
 	def LIT[U](x:U) = c.Expr[U](Literal(Constant(x)))
-	//def mkSome(t: Tree) = 
+	
+	// Problem... buildObject cannot work for lists etc because the length is 
+	// not known at compile time. buildObject needs compile time known names...
+	def rparseList(tpe:Type,iname:String):Tree = {
+	  val TypeRef(_,_,List(argTpe)) = tpe
+	  /*
+	  reify {  val name = LIT(iname).splice
+	    var list:List[Any] = Nil
+	    def lstBuild(index:Int) {
+		  try {
+		    list = c.Expr(buildObject(argTpe,name)).splice :: list
+			lstBuild(index+1)
+		  } catch {
+		    case _: Throwable => list.reverse
+		  }
+		}
+	  }.tree
+	  */
+	  reify { 4::Nil }.tree
+	} 
+	
+	def rparseDate(iname:String)   = reify { 
+	  val name = LIT(iname).splice
+	  
+	  (dtf.splice).parse(getArg(name,params.splice))
+	}
 	
 	def rparseInt(iname:String)    = reify { val name = LIT(iname).splice
 	  try {
@@ -77,10 +122,14 @@ object Macros {
 	  else if (tpe =:= typeOf[Float])  { rparseFloat(name).tree  }
 	  else if (tpe =:= typeOf[Double]) { rparseDouble(name).tree }
 	  else if (tpe =:= typeOf[String]) { rparseString(name).tree }
+	  else if (tpe =:= typeOf[Date])   { rparseDate(name).tree	 }
 	  // The privlaged types
 	  else if (tpe.erasure =:= typeOf[Option[Any]]) {
 	    rparseOption(tpe,name)
       }
+	  else if (tpe.erasure =:= typeOf[List[Any]]) {
+	    rparseList(tpe,name)
+	  }
 	  // Must be a complex object. Hopefully it can be instanced normally
 	  else {
 	    val sym = tpe.typeSymbol  
@@ -130,6 +179,7 @@ object Macros {
 	}
 	
     val tpe = weakTypeOf[A]
+	
 	c.Expr[A](buildObject(tpe,""))
   }
 }

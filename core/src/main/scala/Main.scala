@@ -9,6 +9,6 @@ object Main {
   
   def main(args: Array[String]) {
     println("Hello world. Macro reconstruction rocks.")
-	println(Macros.classBuilder[Junk](stuff))
+	//println(Macros.classBuilder[Junk](stuff))
   }
 }

@@ -1,5 +1,6 @@
 
 import org.specs2.mutable.Specification
+import java.util.Date
 
 case class Junk(in:Int, in2:String)
 case class MutableJunk(var in:Int,var in2:String)
@@ -8,6 +9,15 @@ case class Crazy(name:String,thg:ThingWithJunk)
 case class WithOption(in:Int,opt:Option[String])
 case class OptionOption(in:Option[Option[Int]])
 case class JunkWithDefault(in:Int, in2:String="Default...")
+case class WithList(name:String, lst:List[Int])
+
+
+case class WithDate(name:String, date: Date) {
+  override def equals(in:Any) = in match {
+    case that: WithDate => name == that.name && date.toString ==that.date.toString
+	case _ => false
+  }
+}
 
 class ClassWithDef(val in:Int=4) {
   override def toString = s"ClassWithDef(in:$in)"
@@ -23,7 +33,24 @@ class MacroSpec extends Specification {
   val refJunk = Junk(2,"cats")
   val refJunkDict = Map("in"->refJunk.in.toString,"in2"->refJunk.in2)
   
+  import java.text.SimpleDateFormat
+  implicit val defaultDateFormat = new DateFormat("EEE MMM d HH:mm:ss zzz yyyy")
+  
+  
   "Macros" should {
+    
+	"Parse WithList" in {
+	  val expected = WithList("Bob", 1::Nil)
+	  val params = Map("name"->"Bob","lst0"->"1")
+	  Macros.classBuilder[WithList](params) must_== expected
+	}
+	
+	"Parse date info" in {
+	  val expected = WithDate("Bob",new Date)
+	  val params = Map("name"->"Bob","date"->expected.date.toString)
+	  
+	  Macros.classBuilder[WithDate](params) must_== expected
+	}
     
 	"Generate a Junk" in {
 	  Macros.classBuilder[Junk](refJunkDict) must_== refJunk
@@ -105,6 +132,7 @@ class MacroSpec extends Specification {
 	  Macros.classBuilder[Junk](Map("in"->"2ffds","in2"->"cats")
 		) must throwA[ParseException](message="Error parsing value 'in' to Int")
 	}
+	
   }
 
 }
