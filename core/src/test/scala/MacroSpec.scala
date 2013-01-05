@@ -43,37 +43,51 @@ class MacroSpec extends Specification {
   
   
   "Macros" should {
-  
+    
+    "Testing..." in {
+	  val a = Macros.tester(1)(3)
+	} 
+	
+		// This fails to compile: complains about type parameters for List
+	"parse List[Int]" in {
+      val expected = 1::2::3::4::Nil
+      val params = Map("d.0"->"1","d.1"->"2","d.2"->"3","d.3"->"4")
+	  
+      //val result = Macros.classBuilder[List[Int]](params,"d")
+	  val result = Macros.classBuilder[List[Int]](params,"d")
+	   
+	  result must_== expected
+    }
+		
+	"parse List[List[Int]]" in {
+      val expected = (1::2::Nil)::(3::4::Nil)::Nil
+      val params = Map("d.0.0"->"1","d.0.1"->"2","d.1.0"->"3","d.1.1"->"4")
+	  
+      //val result = Macros.classBuilder[List[Int]](params,"d")
+	  val result = Macros.classBuilder[List[List[Int]]](params,"d")
+	   
+	  result must_== expected
+    }
+	
 	"Parse WithList" in {
 	  val expected = WithList("Bob", 1::4::Nil)
-	  val params = Map("d.name"->"Bob","d.lst0"->"1","d.lst1"->"4")
+	  val params = Map("d.name"->"Bob","d.lst.0"->"1","d.lst.1"->"4")
 	  Macros.classBuilder[WithList](params,"d") must_== expected
 	}
 	
 	"parse WithObjList" in {
 	//case class ThingWithJunk(name:String, junk:Junk)
       val expected = WithObjList("Bob",ThingWithJunk("Bobby",Junk(1,"one"))::ThingWithJunk("Bill",Junk(2,"two"))::Nil)
-      val params = Map("d.name"->"Bob","d.list1.name"->"Bill","d.list0.name"->"Bobby","d.list0.junk.in"->"1","d.list0.junk.in2"->"one","d.list1.junk.in"->"2","d.list1.junk.in2"->"two")
+      val params = Map("d.name"->"Bob","d.list.1.name"->"Bill","d.list.0.name"->"Bobby","d.list.0.junk.in"->"1","d.list.0.junk.in2"->"one","d.list.1.junk.in"->"2","d.list.1.junk.in2"->"two")
       Macros.classBuilder[WithObjList](params,"d") must_== expected
     }
 	
 	"parse List[Bill]" in {
 	//case class ThingWithJunk(name:String, junk:Junk)
       val expected = Bill(1)::Bill(3)::Nil
-      val params = Map("d0.in"->"1","d0.1"->"2","d1.in"->"3","d1.d1"->"4")
+      val params = Map("d.0.in"->"1","d.1.in"->"3",/*junk terms*/"d.1.d1"->"4","d.0.1"->"2")
       Macros.classBuilder[List[Bill]](params,"d") must_== expected
     }
-	/*	// This fails to compile: complains about type parameters for List
-	"parse List[List[Int]]" in {
-	//case class ThingWithJunk(name:String, junk:Junk)
-      val expected = (1::2::Nil)::(3::4::Nil)::Nil
-      val params = Map("d0.in"->"1","d0.1"->"2","d1.in"->"3","d1.d1"->"4")
-	  
-      val result = Macros.classBuilder[List[List[Int]]](params,"d")
-	  
-	  result must_== expected
-    }
-	*/
 	
 	"parse BillyB which extends Billy[Int]" in {
 	  val expected = BillyB(3)

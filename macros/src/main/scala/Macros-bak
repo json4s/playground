@@ -47,26 +47,107 @@ object Macros {
 	// Could always just cut down the params here and pass that on...
 	def rparseList(tpe:Type,name:c.Expr[String]):Tree = {
 	  val TypeRef(_,_,List(argTpe)) = tpe
-	  val freshNme = newTermName(c.fresh("nme$"))
 	  
-	  reify{
-		params.splice.keys.filter{
-		  _.startsWith(name.splice)	// Remove keys that are not part of the list of objects
-		}.map{ k => 
-		  k.subSequence(name.splice.length+1,k.length) // Remove first part and the period
-		}.map{ k=>
-		  k.toString.split("""\.""",2)(0)	// Basically just keep the list index
-		}.toList.distinct.sorted.map{ k =>
-		  c.Expr(ValDef(	// Need to use a fresh name to avoid stuff like 'val nme = nme'
-			        Modifiers(), 
-			        freshNme,
-                    TypeTree(typeOf[String]), 
-                    CONCAT(CONCAT(name,LIT(".")),c.Expr[String](Ident("k"))).tree
-                  )).splice
-		  // Now insert the actual build object code here
-		  c.Expr(buildObject(argTpe,c.Expr[String](Ident(freshNme)))).splice 
-		}
-	  }.tree
+	  /*  The Expression below comes for this block, with the AppliedTypeTree
+	   *  terms changed and a name concantation added
+	   * reify {
+       *   def lstBuild(index:Int,lst:List[Int]):List[Int] = {
+       *     try {
+       *       lstBuild(index+1,4::lst)
+       *     } catch {
+       *       case _: java.util.NoSuchElementException => lst.reverse
+       *     }
+       *   }
+       *   lstBuild(0,Nil)
+       * }
+	   */
+	   
+	    def recTpe(tpe:Type):List[Tree] = {
+	      try {
+		    println(s"Found type: $tpe")
+		    val TypeRef(_,_,List(argTpe)) = tpe
+			//AppliedTypeTree(recTpe(argTpe), List(Ident(argTpe.typeSymbol)))
+			List(AppliedTypeTree(Ident(tpe.typeSymbol), recTpe(argTpe))) 
+	      } catch {
+	        case e:MatchError => List(Ident(tpe.typeSymbol))
+	      }
+	    }
+		//List(Ident(argTpe.typeSymbol))))
+	    val argTypeTree = AppliedTypeTree(Ident(newTypeName("List")),recTpe(argTpe))
+		
+		val indexTerm = newTermName(c.fresh("index$"))
+		val lstBuildTerm = newTermName(c.fresh("lstBuild$"))
+	   
+      //c.Expr(
+        Block(
+          List(
+    	    DefDef(Modifiers(), 
+	          //newTermName("lstBuild"), 
+			  lstBuildTerm,
+		      List(), 
+              List(
+		        List(
+                  ValDef(
+			        Modifiers(PARAM), 
+			        //newTermName("index"), 
+					indexTerm,
+                    Ident(typeOf[Int].typeSymbol), 
+                    EmptyTree
+                  ), 
+                  ValDef(
+                    Modifiers(PARAM), 
+                    newTermName("lst"), 
+                    //AppliedTypeTree(Ident(newTypeName("List")), List(Ident(argTpe.typeSymbol))), 
+					argTypeTree,
+                    EmptyTree
+                  )
+                )
+              ), 
+              //AppliedTypeTree(Ident(newTypeName("List")), List(Ident(argTpe.typeSymbol))),
+			  argTypeTree,
+             // The function block
+              Try(
+                Apply(
+                  //Ident(newTermName("lstBuild")),
+				  Ident(lstBuildTerm),
+                  List(
+                    Apply(
+                      //Select(Ident(newTermName("index")), newTermName("$plus")), List(Literal(Constant(1)))
+					  Select(Ident(indexTerm), newTermName("$plus")), List(Literal(Constant(1)))
+                    ), 
+                    Block(
+                      List(EmptyTree),
+                      Apply(
+                        Select(Ident(newTermName("lst")), newTermName("$colon$colon")), 
+				  
+                        List(
+                          buildObject(
+                            argTpe,c.Expr[String](Apply(
+                              //Select(name.tree, newTermName("$plus")), List(Ident(newTermName("index")))
+							  Select(CONCAT(name,LIT(".")).tree, newTermName("$plus")), List(Ident(indexTerm))
+                            ))
+                          )
+                        )
+                      ) 
+                    ) // Block
+                  )
+                ), 	// Apply
+                List(
+                  CaseDef(
+                    Typed(Ident(nme.WILDCARD), Ident(typeOf[java.util.NoSuchElementException].typeSymbol)), 
+                    //EmptyTree,	// Could use this to test if the map is empty
+					reify{params.splice.keys.filter{_.startsWith(name.splice)}.size > 0}.tree,
+                    Select(Ident(newTermName("lst")), newTermName("reverse"))
+                  )
+                ), 
+                EmptyTree    // Would have been a finally bock?
+              )
+            )
+          ),
+          // Apply(Ident(newTermName("lstBuild")), List(Literal(Constant(0)), reify{Nil}.tree))
+		  Apply(Ident(lstBuildTerm), List(Literal(Constant(0)), reify{Nil}.tree))
+        )  // Block
+     // ).tree
 	}
 	
 	def rparseDate(iname:c.Expr[String])   = reify { 
