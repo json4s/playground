@@ -44,15 +44,11 @@ object Macros {
 	
 	// For building objects that take type parameters
 	def typeArgumentTree(t: c.Type): c.Tree = t match {
-      case TypeRef(_, _, typeArgs @ _ :: _) => AppliedTypeTree(Ident(t.typeSymbol), typeArgs map (t=>typeArgumentTree(t)) )
+      case TypeRef(_, _, typeArgs @ _ :: _) => AppliedTypeTree(
+            Ident(t.typeSymbol), typeArgs map (t=>typeArgumentTree(t)) )
       case _                                => Ident(t.typeSymbol.name)
     }
 	
-		
-	
-	// Problem... buildObject cannot work for lists etc because the length is 
-	// not known at compile time. buildObject needs compile time known names...
-	// Could always just cut down the params here and pass that on...
 	def rparseList(tpe:Type,name:c.Expr[String]):Tree = {
 	  val TypeRef(_,_,List(argTpe)) = tpe
 	  val freshNme = newTermName(c.fresh("nme$"))
@@ -138,6 +134,7 @@ object Macros {
 	
 	// The really heavyweight function. Most of the magic happens in the last else statement
 	def buildObject(tpe: Type, name:c.Expr[String]):Tree = {
+	  // simple types
 	  if      (tpe =:= typeOf[Int])    { rparseInt(name).tree    }
 	  else if (tpe =:= typeOf[Long])   { rparseLong(name).tree   }
 	  else if (tpe =:= typeOf[Float])  { rparseFloat(name).tree  }
@@ -154,30 +151,20 @@ object Macros {
 	  // Must be a complex object. Hopefully it can be instanced normally
 	  else {
 		// Create new object, and fill params with error catching expressions
-		// If param takes defaults, try to find the val in map, or call 
-		// default evaluation from its companion object
-		// Need to get the different type in the type parameters to match to the constructor types
 		
-		// Make a map to handle substitution of generic objects
-		val sym = tpe.typeSymbol  
-	    val ctorM = tpe.member(nme.CONSTRUCTOR).asMethod
-	    val ctorParams = ctorM.paramss
+		val TypeRef(_,sym:Symbol,tpeArgs:List[Type]) = tpe
+		val ctorParams = tpe.member(nme.CONSTRUCTOR).asMethod.paramss
 		
-		val TypeRef(_,_,tpeArgs:List[Type]) = tpe
-		val tpeParamMap:Map[Type,Type] = Map( 
-			(tpe.typeSymbol.asClass.typeParams.map{_.asType.toType
-			}.zip(tpeArgs)):_*)
-	
-		//println(s"tpeParamsMap: $tpeParamMap")	// Debugging
-	
 	    New(typeArgumentTree(tpe),ctorParams.map{_.zipWithIndex.map{
 		  case (pSym,index) => // Change out the types if it has type parameters
-		    val pTpe = tpeParamMap.get(pSym.typeSignature).getOrElse(
-			pSym.typeSignature).substituteTypes(sym.asClass.typeParams,tpeArgs)
+		    val pTpe = pSym.typeSignature.substituteTypes(sym.asClass.typeParams,tpeArgs)
 			(pTpe,pSym,index)  // Substituted tpe, the symbol, and index
 		  }.map { case (pTpe,pSym,index) =>
-		  // gen list of trees that eval to params
+		  // gen list of trees that eval to this types params
 	      val compName = CONCAT(CONCAT(name,LIT(".")),LIT(pSym.name.decoded))
+		  
+		  // If param has defaults, try to find the val in map, or call 
+		  // default evaluation from its companion object
 		  if (pSym.asTerm.isParamWithDefault) {
 			reify {
 			  try {
