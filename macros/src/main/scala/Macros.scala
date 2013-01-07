@@ -42,6 +42,14 @@ object Macros {
 	def LIT[B](x:B) = c.Expr[B](Literal(Constant(x)))
 	def CONCAT(a:c.Expr[String],b:c.Expr[String]) = reify{a.splice+b.splice}
 	
+	// For building objects that take type parameters
+	def typeArgumentTree(t: c.Type): c.Tree = t match {
+      case TypeRef(_, _, typeArgs @ _ :: _) => AppliedTypeTree(Ident(t.typeSymbol), typeArgs map (t=>typeArgumentTree(t)) )
+      case _                                => Ident(t.typeSymbol.name)
+    }
+	
+		
+	
 	// Problem... buildObject cannot work for lists etc because the length is 
 	// not known at compile time. buildObject needs compile time known names...
 	// Could always just cut down the params here and pass that on...
@@ -128,6 +136,7 @@ object Macros {
 	  
 	}
 	
+	// The really heavyweight function. Most of the magic happens in the last else statement
 	def buildObject(tpe: Type, name:c.Expr[String]):Tree = {
 	  if      (tpe =:= typeOf[Int])    { rparseInt(name).tree    }
 	  else if (tpe =:= typeOf[Long])   { rparseLong(name).tree   }
@@ -144,20 +153,32 @@ object Macros {
 	  }
 	  // Must be a complex object. Hopefully it can be instanced normally
 	  else {
-	    val sym = tpe.typeSymbol  
-	    val ctorM = tpe.member(nme.CONSTRUCTOR).asMethod
-	    val ctorParams = ctorM.paramss
-		
 		// Create new object, and fill params with error catching expressions
 		// If param takes defaults, try to find the val in map, or call 
 		// default evaluation from its companion object
-	    New(sym,(ctorParams(0).zipWithIndex.map { case (pSym,index) => 
+		// Need to get the different type in the type parameters to match to the constructor types
+		
+		// Make a map to handle substitution of generic objects
+		val sym = tpe.typeSymbol  
+	    val ctorM = tpe.member(nme.CONSTRUCTOR).asMethod
+	    val ctorParams = ctorM.paramss
+		
+		val TypeRef(_,_,tpeArgs:List[Type]) = tpe
+		val tpeParamMap:Map[Type,Type] = Map( 
+			(tpe.typeSymbol.asClass.typeParams.map{_.asType.toType
+			}.zip(tpeArgs)):_*)
+	
+		//println(s"tpeParamsMap: $tpeParamMap")	// Debugging
+	
+	    New(typeArgumentTree(tpe),ctorParams.map{_.zipWithIndex.map{
+		  case (pSym,index) => // Change out the types if it has type parameters
+		    val pTpe = tpeParamMap.get(pSym.typeSignature).getOrElse(
+			pSym.typeSignature).substituteTypes(sym.asClass.typeParams,tpeArgs)
+			(pTpe,pSym,index)  // Substituted tpe, the symbol, and index
+		  }.map { case (pTpe,pSym,index) =>
 		  // gen list of trees that eval to params
-	      val pTpe = pSym.typeSignature
-		  val compName = CONCAT(CONCAT(name,LIT(".")),LIT(pSym.name.decoded))
-		  
+	      val compName = CONCAT(CONCAT(name,LIT(".")),LIT(pSym.name.decoded))
 		  if (pSym.asTerm.isParamWithDefault) {
-		    //println(s"-------------------- $sym --------------------") //debug
 			reify {
 			  try {
 			    c.Expr(buildObject(pTpe, compName)).splice // splice in another obj tree
@@ -165,16 +186,6 @@ object Macros {
 			    case e: java.util.NoSuchElementException =>
 				  // Need to use the origional symbol.companionObj to get defaults
 				  // Would be better to find the generated TermNames if possible
-				  
-				  /* Tries to throw a "partially defined" optional param error.
-				   * This is not working. It catches when elements have names 
-				   * that are substrings of each other such as IN and INa
-				  if((params.splice).keys.map{ x=>
-				    println(s"Key: $x")
-				    x.startsWith(LIT(name).splice)
-				  }.reduce(_&&_)) throw e
-				  */
-				  
 				  c.Expr(Select(Ident(sym.companionSymbol),newTermName(
 				    "$lessinit$greater$default$" + (index+1).toString))
 				  ).splice
@@ -182,14 +193,13 @@ object Macros {
 			}.tree
 		  } else buildObject(pTpe, compName) // Required
 		  
-	    }):_*)
+	    }})	// Using the New(Tree,List(List(Tree))) constructor
 		// Here is where we need to populate mutable fields not in constructor
 		
 	  }
 	}
 	
-    val tpe = weakTypeOf[U]
-	
+	val tpe = weakTypeOf[U]
 	c.Expr[U](buildObject(tpe,name))
   }
 }

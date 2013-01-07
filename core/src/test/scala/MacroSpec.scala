@@ -11,6 +11,15 @@ case class OptionOption(in:Option[Option[Int]])
 case class JunkWithDefault(in:Int, in2:String="Default...")
 case class WithList(name:String, lst:List[Int])
 case class WithObjList(name:String, list:List[ThingWithJunk])
+case class Curried(in1:Int,in2:Int)(in3:Int)
+case class WithTpeParams[U](in1:U)
+class WithNstedTpeParams[U,U2](val in1: U, val in2:WithTpeParams[U2]) {
+  override def equals(in:Any) = in match {
+    case in:WithNstedTpeParams[U,U2] => in.in1 == in.in1 && in.in2 == in2
+	case _ => false
+  }
+}
+case class ResolvedParams[U](in3: U, in4:WithTpeParams[Int]) extends WithNstedTpeParams[U,Int](in3,in4)
 
 case class Bill(in:Int)
 
@@ -46,7 +55,32 @@ class MacroSpec extends Specification {
     
     "Testing..." in {
 	  val a = Macros.tester(1)(3)
-	} 
+	}
+	
+	"Handle type parameters" in {
+	  //case class WithTpeParams[U](in1:U)
+	  val expected = WithTpeParams(100)
+	  val params = Map("d.in1"->"100")
+	  Macros.classBuilder[WithTpeParams[Int]](params,"d") must_== expected
+	}
+	
+	"Handle nested type parameters, WithNstedTpeParams[U,U2](U, WithTpeParams[U2])" in {
+	  val expected = new WithNstedTpeParams("cat",WithTpeParams(100))
+	  val params = Map("d.in1"->"cat","d.in2.in1"->"100")
+	  Macros.classBuilder[WithNstedTpeParams[String,Int]](params,"d") must_== expected
+	}
+	
+	"Handle partially resolved, ResolvedParams[U](in3: U, in4:WithTpeParams[Int])" in {
+	  val expected = new ResolvedParams("cat",WithTpeParams(100))
+	  val params = Map("d.in3"->"cat","d.in4.in1"->"100")
+	  Macros.classBuilder[ResolvedParams[String]](params,"d") must_== expected
+	}
+	
+	"Curried case class" in {
+	  val expected = Curried(1,2)(3)
+	  val params = Map("d.in1"->"1","d.in2"->"2","d.in3"->"3")
+	  Macros.classBuilder[Curried](params,"d") must_== expected
+	}
 	
 		// This fails to compile: complains about type parameters for List
 	"parse List[Int]" in {
@@ -85,7 +119,7 @@ class MacroSpec extends Specification {
 	"parse List[Bill]" in {
 	//case class ThingWithJunk(name:String, junk:Junk)
       val expected = Bill(1)::Bill(3)::Nil
-      val params = Map("d.0.in"->"1","d.1.in"->"3",/*junk terms*/"d.1.d1"->"4","d.0.1"->"2")
+      val params = Map("d.0.in"->"1","d.1.in"->"3","d.1.d1"->"4","d.0.1"->"2")
       Macros.classBuilder[List[Bill]](params,"d") must_== expected
     }
 	
