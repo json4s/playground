@@ -32,6 +32,7 @@ object MyBuild extends Build {
     file("macros"),
     settings = buildSettings ++ Seq(
       libraryDependencies <+= (scalaVersion)("org.scala-lang" % "scala-reflect" % _))
+    
   )
 
   lazy val core: Project = Project(
