@@ -11,8 +11,9 @@ import playground.ValueProvider
 class ParseException(message: String, cause: Exception) extends Exception(message, cause)
 
 object Macros {
+  val defaultDateFormat = new java.text.SimpleDateFormat("EEE MMM d HH:mm:ss zzz yyyy")
   
-  type ParamsTpe = ValueProvider[Map[String,Any]]
+  type ParamsTpe = ValueProvider[_]
   
   // Some helpers to make things a little more simple in the generated code
   def getInt(name:String,in:Any):Int = in match {
@@ -52,7 +53,13 @@ object Macros {
     case s => s.toString
   }
   
+  def getDate(name:String, in:Any):Date = in match {
+    case s:Date => s
+    case s:String => defaultDateFormat.parse(s)
+    case e => throw new ParseException(s"Error converting item '$name' to Date. Value: $e",null)
+  }
   
+  // The meat and potatoes of the implementation.
   def classBuilder[U](params: ParamsTpe,name:String) = macro classbuilder[U]
   def classbuilder[U: c.WeakTypeTag](c: Context)(params: c.Expr[ParamsTpe],name:c.Expr[String]):c.Expr[U] = {
     import c.universe._
@@ -82,19 +89,34 @@ object Macros {
                     TypeTree(typeOf[ParamsTpe]), 
                     reify{params.splice.forPrefix(name.splice)}.tree
                   )
+      val listNme = newTermName("lst")
+      val listTree = ValDef(
+                      Modifiers(MUTABLE),
+                      listNme,
+                      typeArgumentTree(tpe),
+                      reify{Nil}.tree
+        )
+        
       reify{
         c.Expr(freshParamsTree).splice
-        val items = freshParams.splice.keySet
-        items.toList.sorted.map{ itemnumber =>
-          c.Expr{buildObject(argTpe, c.Expr[String](Ident("itemnumber")),freshParams)}.splice
+        c.Expr(listTree).splice
+        var items = freshParams.splice.keySet.size-1
+        while(items >= 0) {
+          val itemnumber = items.toString
+          // Manual tree manipulation is fastest...
+          c.Expr{Assign(Ident(listNme),Apply(Select(Ident(listNme),
+              newTermName("$colon$colon")),
+              List(buildObject(argTpe, c.Expr[String](Ident("itemnumber")),freshParams))))
+          }.splice
+          
+          items-=1
         }
-        //Nil
+        c.Expr(Ident(listNme)).splice
       }.tree
     }
     
     def rparseDate(iname:c.Expr[String], params: c.Expr[ParamsTpe])   = reify { 
       val name = iname.splice
-      
       //(dtf.splice).parse(getArg(name,params.splice))
       new Date
     }
@@ -195,7 +217,7 @@ object Macros {
             } else buildObject(pTpe, compName,newParamsExpr) // Required
             
           }})    // Using the New(Tree,List(List(Tree))) constructor
-        ) // New objValDef
+        ) // newObjTree ValDef
         
         // Here we generate the code for setting fields not in the constructor
         val vars = getVars(tpe)
@@ -209,13 +231,13 @@ object Macros {
                 newParamsExpr
               )
             )).splice
-            } catch {
+            } catch { // Don't care if they fail
               case _ : java.util.NoSuchElementException =>
             }
           }.tree
         }
         
-        Block((newProviderTree::newObjTree::Nil):::setParamsBlocks,Ident(newObjTerm))
+        Block(newProviderTree::newObjTree::setParamsBlocks,Ident(newObjTerm))
       }
     }
     

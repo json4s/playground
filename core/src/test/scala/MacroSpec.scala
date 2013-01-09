@@ -46,6 +46,45 @@ class ClassWithDef(val in:Int=4) {
   }
 }
 
+class Stopwatch {
+
+  private var startTime = -1L
+  private var stopTime = -1L
+  private var running = false
+
+  def start(): Stopwatch = {
+    startTime = System.currentTimeMillis()
+    running = true
+    this
+  }
+
+  def stop(): Stopwatch = {
+    stopTime = System.currentTimeMillis()
+    running = false
+    this 
+  }
+
+  def isRunning(): Boolean = running
+
+  def getElapsedTime() = {
+    if (startTime == -1) {
+      0
+    }
+    if (running) {
+      System.currentTimeMillis() - startTime
+    }
+    else {
+      stopTime - startTime
+    }
+  }
+
+  def reset() {
+    startTime = -1
+    stopTime = -1
+    running = false
+  }
+}
+
 case class ObjWithDefJunk(name:String, junk:Junk=Junk(-1,"Default"))
 
 class MacroSpec extends Specification {
@@ -54,8 +93,31 @@ class MacroSpec extends Specification {
   
   //implicit val defaultDateFormat = new DateFormat("EEE MMM d HH:mm:ss zzz yyyy")
   
-  
   "Macros" should {
+  /*
+  "Make a lot of things" in {
+    //Junk(in1:Int, in2:String)
+    //ThingWithJunk(name:String, junk:Junk)
+    val stuff = new scala.collection.mutable.MutableList[ThingWithJunk]()
+    val params = new scala.collection.mutable.HashMap[String,Any]
+    import scala.util.Random
+    (0 until 200) foreach{ i =>
+      val thng = ThingWithJunk("name_"+i,Junk(Random.nextInt,"junker"+Random.nextInt))
+      stuff += thng
+      val str = "dd."+i.toString
+      params+= str+".name" -> thng.name
+      params+= str+".junk.in1" -> thng.junk.in1.toString
+      params+= str+".junk.in2" -> thng.junk.in2
+    }
+    val mapParams = params.toMap
+    val stopwatch = new Stopwatch
+    var result = Macros.classBuilder[List[ThingWithJunk]](mapParams,"dd")
+    stopwatch.start
+    result = Macros.classBuilder[List[ThingWithJunk]](mapParams,"dd")
+    stopwatch.stop
+    println(s"--------------- Time: ${stopwatch.getElapsedTime*0.001} sec ------------------")
+    result must_== stuff.toList
+  }
   
 	"Primative Int" in {
 	  val expected:Int = 5
@@ -96,9 +158,7 @@ class MacroSpec extends Specification {
     Macros.classBuilder[MutableJunkWithField](params,"d") must_== expected
     
   }
-  
-  
-  
+  */
 	"Generate a ThingWithJunk" in {
 	  val expected = ThingWithJunk("Bob",Junk(2,"SomeJunk..."))
 	  val stuff = mapStoMapAny(Map("dog.junk.name"->expected.name,"dog.name"->expected.name,"dog.junk.in1"->expected.junk.in1.toString,
@@ -117,7 +177,7 @@ class MacroSpec extends Specification {
 	  val result = Macros.classBuilder[Crazy](stuff,"d")
 	  result must_== expected
 	}
-  
+  /*
 	"Parse date info" in {
 	  val expected = WithDate("Bob",new Date)
 	  val params = mapStoMapAny(Map("d.name"->"Bob","d.date"->expected.date.toString))
@@ -275,6 +335,6 @@ class MacroSpec extends Specification {
     val params = mapStoMapAny(Map("d.in1"->"2ffds","d.in2"->"cats"))
 	  Macros.classBuilder[Junk](params,"d") must throwA[ParseException](message="Error parsing value 'd.in1' to Int")
 	}
-	
+	*/
   }
 }

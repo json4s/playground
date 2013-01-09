@@ -30,8 +30,8 @@ class MapValueReader(protected val data: Map[String, Any], val prefix: String = 
 
   lazy val values: Map[String, Any] = stripPrefix(data)
 
-  def keySet: Set[String] = data.collect{ 
-    case (key,_) if key.startsWith(prefix) => separated.topLevelOnly(key,prefix)
+  def keySet: Set[String] = data.keys.collect{ 
+    case (key) if key.startsWith(prefix) => separated.topLevelOnly(key,prefix)
   }.toSet
 
   def --(keys: Iterable[String]) = new MapValueReader(data -- keys.map(separated.wrap(_, prefix)), prefix, separated)
