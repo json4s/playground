@@ -138,11 +138,29 @@ object Macros {
         case _ => c.abort(c.enclosingPosition, "Map must contain primative types as keys!")
       }
       
+        // Build the tree much like the function toMap does
+      val mapBuilderTree = ValDef(Modifiers(), newTermName("b"), TypeTree(),
+          TypeApply(reify{scala.collection.immutable.Map.newBuilder}.tree,
+            List(typeArgumentTree(keyTpe), typeArgumentTree(valTpe))
+          )
+        )
+      // code comlains of unknown type if we try to use c.Expr().splice for some reason
+      val addValTree = Apply(Select(Ident("b"),newTermName("$plus$eq")),
+                          List(Apply(Select(Ident("scala"),newTermName("Tuple2")),
+                            List(keyParser.tree,buildObject(valTpe,kExpr,freshParams))
+                            )
+                          )
+                        )
+      
       reify {
+      // This is more simple to do using collections functions, but this is more 
+      // performant. Check older commits for simpler version (da050fb6d1c317228cbcedeac9db91221d4565da)
         c.Expr(freshParamsTree).splice
-        freshParams.splice.keySet.map{ k => // Must use k or 
-          (keyParser.splice, 
-          c.Expr(buildObject(valTpe,kExpr,freshParams)).splice) }.toMap
+        c.Expr(mapBuilderTree).splice // Defines val b = mapBuilder
+        freshParams.splice.keySet.foreach { k => // Must use k or rename above
+          c.Expr(addValTree).splice
+        }
+        c.Expr(Select(Ident("b"),newTermName("result"))).splice
       }.tree
     }
     
@@ -200,7 +218,7 @@ object Macros {
       else if (tpe =:= typeOf[Float])  { rparseFloat(name,params).tree  }
       else if (tpe =:= typeOf[Double]) { rparseDouble(name,params).tree }
       else if (tpe =:= typeOf[String]) { rparseString(name,params).tree }
-      else if (tpe =:= typeOf[Date])   { rparseDate(name,params).tree     }
+      else if (tpe =:= typeOf[Date])   { rparseDate(name,params).tree   }
       // The privlaged types
       else if (tpe.erasure =:= typeOf[Option[Any]]) {
         rparseOption(tpe,name,params)

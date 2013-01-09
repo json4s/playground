@@ -115,7 +115,7 @@ class MacroSpec extends Specification {
     
     Macros.classBuilder[Map[String,Junk]](data,"dd") must_== expected
   }
-  /*
+  
   "Make a lot of things" in {
     //Junk(in1:Int, in2:String)
     //ThingWithJunk(name:String, junk:Junk)
@@ -356,6 +356,6 @@ class MacroSpec extends Specification {
     val params = mapStoMapAny(Map("d.in1"->"2ffds","d.in2"->"cats"))
 	  Macros.classBuilder[Junk](params,"d") must throwA[ParseException](message="Error parsing value 'd.in1' to Int")
 	}
-	*/
+	
   }
 }
