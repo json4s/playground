@@ -75,9 +75,8 @@ object Macros {
       case _                                => Ident(t.typeSymbol.name)
     }
     
-    def rparseList(tpe:Type,name:c.Expr[String], params: c.Expr[ParamsTpe]):Tree = {
-      val TypeRef(_,_,List(argTpe)) = tpe
-      
+    // For generating new new params set down the tree one step
+    def genFreshParams(name: c.Expr[String], params: c.Expr[ParamsTpe]):(TermName,c.Expr[ParamsTpe],Tree) = {
       val freshNme = newTermName(c.fresh("freshParams$"))
       val freshParams = c.Expr[ParamsTpe](Ident(freshNme))
       
@@ -89,6 +88,15 @@ object Macros {
                     TypeTree(typeOf[ParamsTpe]), 
                     reify{params.splice.forPrefix(name.splice)}.tree
                   )
+      
+      (freshNme,freshParams,freshParamsTree)
+    }
+    
+    def rparseList(tpe:Type,name:c.Expr[String], params: c.Expr[ParamsTpe]):Tree = {
+      val TypeRef(_,_,List(argTpe)) = tpe
+      
+      val (freshNme,freshParams,freshParamsTree) = genFreshParams(name,params)
+      
       val listNme = newTermName("lst")
       val listTree = ValDef(
                       Modifiers(MUTABLE),
@@ -100,7 +108,7 @@ object Macros {
       reify{
         c.Expr(freshParamsTree).splice
         c.Expr(listTree).splice
-        var items = freshParams.splice.keySet.size-1
+        var items = freshParams.splice.keyCount-1
         while(items >= 0) {
           val itemnumber = items.toString
           // Manual tree manipulation is fastest...
@@ -112,6 +120,29 @@ object Macros {
           items-=1
         }
         c.Expr(Ident(listNme)).splice
+      }.tree
+    } // rparseList
+     
+    def rparseMap(tpe:Type,name:c.Expr[String], params: c.Expr[ParamsTpe])   = {
+      val TypeRef(_,_,keyTpe::valTpe::Nil) = tpe 
+      val (freshNme,freshParams,freshParamsTree) = genFreshParams(name,params)
+      
+      // Makes us capable of parsing maps that contain primatives as keys, not only strings
+      val kExpr = c.Expr[String](Ident("k"))
+      val keyParser = keyTpe match {
+        case a if a =:= typeOf[Int] => reify{getInt(kExpr.splice,kExpr.splice)}
+        case a if a =:= typeOf[Long] => reify{getLong(kExpr.splice,kExpr.splice)}
+        case a if a =:= typeOf[Float] => reify{getFloat(kExpr.splice,kExpr.splice)}
+        case a if a =:= typeOf[Double] => reify{getDouble(kExpr.splice,kExpr.splice)}
+        case a if a =:= typeOf[String] => reify{kExpr.splice}
+        case _ => c.abort(c.enclosingPosition, "Map must contain primative types as keys!")
+      }
+      
+      reify {
+        c.Expr(freshParamsTree).splice
+        freshParams.splice.keySet.map{ k => // Must use k or 
+          (keyParser.splice, 
+          c.Expr(buildObject(valTpe,kExpr,freshParams)).splice) }.toMap
       }.tree
     }
     
@@ -174,6 +205,9 @@ object Macros {
       else if (tpe.erasure =:= typeOf[Option[Any]]) {
         rparseOption(tpe,name,params)
       }
+      else if (tpe.erasure =:= typeOf[Map[_,_]]) {
+        rparseMap(tpe,name,params)
+      }
       else if (tpe.erasure =:= typeOf[List[Any]]) {
         rparseList(tpe,name,params)
         
@@ -181,14 +215,7 @@ object Macros {
       
         val TypeRef(_,sym:Symbol,tpeArgs:List[Type]) = tpe
         val ctorParams = tpe.member(nme.CONSTRUCTOR).asMethod.paramss
-        val newParamsTerm = newTermName(c.fresh("valueProvider$"))
-        val newParamsExpr = c.Expr[ParamsTpe](Ident(newParamsTerm))
-        
-        val newProviderTree = ValDef(Modifiers(),newParamsTerm,TypeTree(typeOf[ParamsTpe]),
-                    reify{
-                      params.splice.forPrefix(name.splice)
-                    }.tree
-                  )
+        val (newParamsTerm,newParamsExpr,newProviderTree) = genFreshParams(name,params)
         
         val newObjTerm = newTermName(c.fresh("newObj$"))
         val newObjTypeTree = typeArgumentTree(tpe)

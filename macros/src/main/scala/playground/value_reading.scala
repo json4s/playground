@@ -7,11 +7,11 @@ trait ValueProvider[S]  {
   protected def data: S
   def read(key: String): Either[Throwable, Option[Any]]
   def get(key: String): Option[Any] = read(key).fold(_ => None, identity)
-  //def apply(key: String): Any = read(key).fold(throw _, _ getOrElse (throw new RuntimeException(s"No entry found for $key")))
   def apply(key: String): Any = read(key).fold(throw _, _ getOrElse (throw new java.util.NoSuchElementException(s"No entry found for '$key'")))
   def forPrefix(key: String): ValueProvider[S]
   def values: S
   def keySet: Set[String]
+  def keyCount:Int = keySet.size
   def --(keys: Iterable[String]): ValueProvider[S]
   def isComplex(key: String): Boolean
   def contains(key: String): Boolean
@@ -25,6 +25,8 @@ object MapValueReader {
 class MapValueReader(protected val data: Map[String, Any], val prefix: String = "", val separated: Separator = by.Dots) extends ValueProvider[Map[String, Any]] {
 
   def read(key: String): Either[Throwable, Option[Any]] = allCatch either { data get separated.wrap(key, prefix) }
+  
+  override def apply(key: String):Any = data(separated.wrap(key, prefix))
 
   def forPrefix(key: String): ValueProvider[Map[String, Any]] = new MapValueReader(data, separated.wrap(key, prefix), separated)
 
@@ -57,6 +59,3 @@ class MapValueReader(protected val data: Map[String, Any], val prefix: String = 
     } else d
   }
 }
-
-
-

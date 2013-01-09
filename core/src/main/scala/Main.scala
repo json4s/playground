@@ -5,6 +5,10 @@ case class Language(name: String, version: Double) extends Serializable
 case class Team(role: String, members: List[Employee]) extends Serializable
 case class Employee(name: String, experience: Int) extends Serializable
 
+case class ThingWithJunk(name:String, junk:Junk)
+case class Crazy(name:String,thg:ThingWithJunk,thg2:ThingWithJunk,thg3:ThingWithJunk,thg4:ThingWithJunk,thg5:ThingWithJunk)
+case class Junk(in1:Int, in2:String)
+
 
 class Stopwatch {
 
@@ -74,18 +78,42 @@ object Main {
   def main(args: Array[String]) {
     println(s"Hello world. Macro reconstruction rocks.")
     val data = project
-    val iterations = 200000
+    val iterations = 2000000
     val counter = new Stopwatch
     
+    val expected = Crazy("crazyBob...",ThingWithJunk("Bob",Junk(2,"SomeJunk...")),ThingWithJunk("Bob",Junk(2,"SomeJunk...")),ThingWithJunk("Bob",Junk(2,"SomeJunk...")),ThingWithJunk("Bob",Junk(2,"SomeJunk...")),ThingWithJunk("Bob",Junk(2,"SomeJunk...")))
+	  val stuff = Map("d.name"->expected.name,
+                "d.thg.name"->expected.thg.name,
+                "d.thg.junk.in1"->expected.thg.junk.in1.toString,
+                "d.thg.junk.in2"->expected.thg.junk.in2.toString,
+                
+                "d.thg2.name"->expected.thg2.name,
+                "d.thg2.junk.in1"->expected.thg2.junk.in1.toString,
+                "d.thg2.junk.in2"->expected.thg2.junk.in2.toString,
+                "d.thg3.name"->expected.thg3.name,
+                "d.thg3.junk.in1"->expected.thg3.junk.in1.toString,
+                "d.thg3.junk.in2"->expected.thg3.junk.in2.toString,
+                
+                "d.thg4.name"->expected.thg4.name,
+                "d.thg4.junk.in1"->expected.thg4.junk.in1.toString,
+                "d.thg4.junk.in2"->expected.thg4.junk.in2.toString,
+                "d.thg5.name"->expected.thg5.name,
+                "d.thg5.junk.in1"->expected.thg5.junk.in1.toString,
+                "d.thg5.junk.in2"->expected.thg5.junk.in2.toString)
+					  
+	  val result = Macros.classBuilder[Crazy](stuff,"d")
+    
     var i = 0
-    while(i < iterations) {
-      val a = Macros.classBuilder[Project](data,"dd")
+    while(i < iterations/5) {
+      //val a = Macros.classBuilder[Project](data,"dd")
+      val b = Macros.classBuilder[Crazy](stuff,"d")
       i+=1
     }
     counter.start
     i = 0
     while(i < iterations) {
-      val a = Macros.classBuilder[Project](data,"dd")
+      //val a = Macros.classBuilder[Project](data,"dd")
+      val b = Macros.classBuilder[Crazy](stuff,"d")
       i+=1
     }
     counter.stop

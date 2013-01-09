@@ -12,7 +12,7 @@ abstract class Separator(val beginning: String, end: String) {
   }
 
   def wrapped(part: String) = {
-    val sb = new StringBuilder
+    var sb = new StringBuilder
     if (hasBeginning && !part.startsWith(beginning))
       sb.append(beginning)
     sb.append(part)

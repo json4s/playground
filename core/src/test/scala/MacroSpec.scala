@@ -94,6 +94,27 @@ class MacroSpec extends Specification {
   //implicit val defaultDateFormat = new DateFormat("EEE MMM d HH:mm:ss zzz yyyy")
   
   "Macros" should {
+  
+  "Build maps of primatives with string key" in {
+    val data = Map("dd.a"->"1","dd.b" ->"2", "dd.c" -> "3")
+    val expected = data.map { case (k,v) => (k.split("""\.""")(1),v.toInt) }
+    
+    Macros.classBuilder[Map[String,Int]](data,"dd") must_== expected
+  }
+  
+  "Build maps of primatives with Int key" in {
+    val data = Map("dd.1"->"1","dd.2" ->"2", "dd.100" -> "3")
+    val expected = data.map { case (k,v) => (k.split("""\.""")(1).toInt,v.toInt) }
+    
+    Macros.classBuilder[Map[Int,Int]](data,"dd") must_== expected
+  }
+  
+  "Build maps of Junks with string key" in {
+    val data = Map("dd.a.in1"->"1","dd.a.in2"->"aaa","dd.b.in1" ->"2","dd.b.in2"->"bbb", "dd.c.in1" -> "3","dd.c.in2"->"ccc")
+    val expected = Map("a"->Junk(1,"aaa"),"b"->Junk(2,"bbb"),"c"->Junk(3,"ccc"))
+    
+    Macros.classBuilder[Map[String,Junk]](data,"dd") must_== expected
+  }
   /*
   "Make a lot of things" in {
     //Junk(in1:Int, in2:String)
@@ -101,7 +122,7 @@ class MacroSpec extends Specification {
     val stuff = new scala.collection.mutable.MutableList[ThingWithJunk]()
     val params = new scala.collection.mutable.HashMap[String,Any]
     import scala.util.Random
-    (0 until 200) foreach{ i =>
+    (0 until 20000) foreach{ i =>
       val thng = ThingWithJunk("name_"+i,Junk(Random.nextInt,"junker"+Random.nextInt))
       stuff += thng
       val str = "dd."+i.toString
@@ -158,7 +179,7 @@ class MacroSpec extends Specification {
     Macros.classBuilder[MutableJunkWithField](params,"d") must_== expected
     
   }
-  */
+  
 	"Generate a ThingWithJunk" in {
 	  val expected = ThingWithJunk("Bob",Junk(2,"SomeJunk..."))
 	  val stuff = mapStoMapAny(Map("dog.junk.name"->expected.name,"dog.name"->expected.name,"dog.junk.in1"->expected.junk.in1.toString,
@@ -177,7 +198,7 @@ class MacroSpec extends Specification {
 	  val result = Macros.classBuilder[Crazy](stuff,"d")
 	  result must_== expected
 	}
-  /*
+  
 	"Parse date info" in {
 	  val expected = WithDate("Bob",new Date)
 	  val params = mapStoMapAny(Map("d.name"->"Bob","d.date"->expected.date.toString))
