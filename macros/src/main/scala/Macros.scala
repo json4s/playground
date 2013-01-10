@@ -59,6 +59,13 @@ object Macros {
     case e => throw new ParseException(s"Error converting item '$name' to Date. Value: $e",null)
   }
   
+  def asyncBuilder[U](params:Macros.ParamsTpe,name:String)(f:(U)=>Unit) = macro asyncimpl[U]
+  def asyncimpl[U:c.WeakTypeTag](c: Context)(params: c.Expr[ParamsTpe],name:c.Expr[String])
+      (f:c.Expr[(U)=>Unit]):c.Expr[Unit] = {
+      import c.universe._
+      
+      c.Expr[Unit](Apply(f.tree,List(classbuilder[U](c)(params,name).tree)))
+  }
   // The meat and potatoes of the implementation.
   def classBuilder[U](params: ParamsTpe,name:String) = macro classbuilder[U]
   def classbuilder[U: c.WeakTypeTag](c: Context)(params: c.Expr[ParamsTpe],name:c.Expr[String]):c.Expr[U] = {
@@ -140,18 +147,15 @@ object Macros {
       
         // Build the tree much like the function toMap does
       val mapBuilderTree = ValDef(Modifiers(), newTermName("b"), TypeTree(),
-          TypeApply(reify{scala.collection.immutable.Map.newBuilder}.tree,
+          TypeApply(reify{scala.collection.mutable.HashMap.empty}.tree,
             List(typeArgumentTree(keyTpe), typeArgumentTree(valTpe))
           )
         )
       // code comlains of unknown type if we try to use c.Expr().splice for some reason
-      val addValTree = Apply(Select(Ident("b"),newTermName("$plus$eq")),
-                          List(Apply(Select(Ident("scala"),newTermName("Tuple2")),
+      val addValTree = Apply(Select(Ident("b"),newTermName("update")),
                             List(keyParser.tree,buildObject(valTpe,kExpr,freshParams))
                             )
-                          )
-                        )
-      
+   
       reify {
       // This is more simple to do using collections functions, but this is more 
       // performant. Check older commits for simpler version (da050fb6d1c317228cbcedeac9db91221d4565da)
@@ -160,7 +164,7 @@ object Macros {
         freshParams.splice.keySet.foreach { k => // Must use k or rename above
           c.Expr(addValTree).splice
         }
-        c.Expr(Select(Ident("b"),newTermName("result"))).splice
+        c.Expr(Select(Ident("b"),newTermName("toMap"))).splice
       }.tree
     }
     

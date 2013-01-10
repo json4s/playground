@@ -116,6 +116,13 @@ class MacroSpec extends Specification {
     Macros.classBuilder[Map[String,Junk]](data,"dd") must_== expected
   }
   
+  "Build a map with polymorphic types" in {
+    //case class WithTpeParams[U](in1:U)
+    val data = Map("dd.a.in1"->"2","dd.b.in1"->"3","dd.d.in1"->"4")
+    val expected = Map("a"->WithTpeParams(2),"b"->WithTpeParams(3),"d"->WithTpeParams(4))
+    Macros.classBuilder[Map[String,WithTpeParams[Int]]](data,"dd") must_== expected
+  }
+  
   "Make a lot of things" in {
     //Junk(in1:Int, in2:String)
     //ThingWithJunk(name:String, junk:Junk)
