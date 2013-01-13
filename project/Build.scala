@@ -30,10 +30,9 @@ object MyBuild extends Build {
   lazy val macros: Project = Project(
     "macros",
     file("macros"),
-    settings = buildSettings ++ Seq(
-      libraryDependencies <+= (scalaVersion)("org.scala-lang" % "scala-reflect" % _))
-    
-  )
+    settings = buildSettings
+  ) dependsOn(ProjectRef(file("""C:\Users\brycea\Documents\GitHub\json4s"""), "json4s-core"),
+  ProjectRef(file("""C:\Users\brycea\Documents\GitHub\json4s"""), "json4s-native"))
 
   lazy val core: Project = Project(
     "core",

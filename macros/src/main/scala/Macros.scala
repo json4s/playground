@@ -1,63 +1,16 @@
 import language.experimental.macros
 import scala.reflect.macros.Context
 
-import scala.collection.mutable.{ListBuffer, Stack}
-
 import java.util.Date
-
 
 import playground.ValueProvider
 
 class ParseException(message: String, cause: Exception) extends Exception(message, cause)
 
 object Macros {
-  val defaultDateFormat = new java.text.SimpleDateFormat("EEE MMM d HH:mm:ss zzz yyyy")
+  import PrimativeHelpers._
   
   type ParamsTpe = ValueProvider[_]
-  
-  // Some helpers to make things a little more simple in the generated code
-  def getInt(name:String,in:Any):Int = in match {
-    case n:Long => n.asInstanceOf[Int]
-    case n:Int => n
-    case s:String => s.toInt
-    case e => throw new ParseException(s"Error converting item '$name' to Int. Value: $e",null)
-  }
-  
-  def getLong(name:String,in:Any):Long = in match {
-    case n:Long => n
-    case n:Int => n.asInstanceOf[Long]
-    case s:String => s.toLong
-    case e => throw new ParseException(s"Error converting item '$name' to Long. Value: $e",null)
-  }
-  
-  def getFloat(name:String,in:Any):Float = in match {
-    case n:Float => n
-    case n:Double => n.asInstanceOf[Float]
-    case n:Long =>   n.asInstanceOf[Float]
-    case n:Int =>    n.asInstanceOf[Float]
-    case s:String => s.toFloat
-    case e => throw new ParseException(s"Error converting item '$name' to Float. Value: $e",null)
-  }
-  
-  def getDouble(name:String,in:Any):Double = in match {
-    case n:Double => n
-    case n:Float => n.asInstanceOf[Double]
-    case n:Long =>   n.asInstanceOf[Double]
-    case n:Int =>    n.asInstanceOf[Double]
-    case s:String => s.toDouble
-    case e => throw new ParseException(s"Error converting item '$name' to Double. Value: $e",null)
-  }
-  
-  def getString(name:String,in:Any):String = in match {
-    case s:String => s
-    case s => s.toString
-  }
-  
-  def getDate(name:String, in:Any):Date = in match {
-    case s:Date => s
-    case s:String => defaultDateFormat.parse(s)
-    case e => throw new ParseException(s"Error converting item '$name' to Date. Value: $e",null)
-  }
   
   def asyncBuilder[U](params:Macros.ParamsTpe,name:String)(f:(U)=>Unit) = macro asyncimpl[U]
   def asyncimpl[U:c.WeakTypeTag](c: Context)(params: c.Expr[ParamsTpe],name:c.Expr[String])
@@ -72,30 +25,21 @@ object Macros {
     import c.universe._
     import Flag._
     
-    def LIT[B](x:B) = c.Expr[B](Literal(Constant(x)))
-    def CONCAT(a:c.Expr[String],b:c.Expr[String]) = reify{a.splice+b.splice}
-    
-    // For building objects that take type parameters
-    def typeArgumentTree(t: c.Type): c.Tree = t match {
-      case TypeRef(_, _, typeArgs @ _ :: _) => AppliedTypeTree(
-            Ident(t.typeSymbol), typeArgs map (t=>typeArgumentTree(t)) )
-      case _                                => Ident(t.typeSymbol.name)
-    }
+    // Some helper functions moved to declutter
+    val helpers = new MacroHelpers[c.type](c)
+    import helpers._
     
     // For generating new new params set down the tree one step
     def genFreshParams(name: c.Expr[String], params: c.Expr[ParamsTpe]):(TermName,c.Expr[ParamsTpe],Tree) = {
       val freshNme = newTermName(c.fresh("freshParams$"))
       val freshParams = c.Expr[ParamsTpe](Ident(freshNme))
       
-      // For some reason this had to be taken out of the reify, causing stack overflow 
-      // on expansion. Maybe a reify in a reify is bad news?
-      val freshParamsTree = ValDef(    // Need to use a fresh name to avoid stuff like 'val nme = nme'
+      val freshParamsTree = ValDef( // Need to use a fresh name to avoid stuff like 'val nme = nme'
                     Modifiers(), 
                     freshNme,
                     TypeTree(typeOf[ParamsTpe]), 
                     reify{params.splice.forPrefix(name.splice)}.tree
                   )
-      
       (freshNme,freshParams,freshParamsTree)
     }
     
@@ -118,7 +62,7 @@ object Macros {
         var items = freshParams.splice.keyCount-1
         while(items >= 0) {
           val itemnumber = items.toString
-          // Manual tree manipulation is fastest...
+          // Manual tree manipulation is fastest, but more subject to scala churn
           c.Expr{Assign(Ident(listNme),Apply(Select(Ident(listNme),
               newTermName("$colon$colon")),
               List(buildObject(argTpe, c.Expr[String](Ident("itemnumber")),freshParams))))
@@ -134,7 +78,7 @@ object Macros {
       val TypeRef(_,_,keyTpe::valTpe::Nil) = tpe 
       val (freshNme,freshParams,freshParamsTree) = genFreshParams(name,params)
       
-      // Makes us capable of parsing maps that contain primatives as keys, not only strings
+      // Capable of parsing maps that contain primatives as keys, not only strings
       val kExpr = c.Expr[String](Ident("k"))
       val keyParser = keyTpe match {
         case a if a =:= typeOf[Int] => reify{getInt(kExpr.splice,kExpr.splice)}
@@ -145,7 +89,7 @@ object Macros {
         case _ => c.abort(c.enclosingPosition, "Map must contain primative types as keys!")
       }
       
-        // Build the tree much like the function toMap does
+      // Build the tree much like the function toMap does
       val mapBuilderTree = ValDef(Modifiers(), newTermName("b"), TypeTree(),
           TypeApply(reify{scala.collection.mutable.HashMap.empty}.tree,
             List(typeArgumentTree(keyTpe), typeArgumentTree(valTpe))
@@ -157,8 +101,9 @@ object Macros {
                             )
    
       reify {
-      // This is more simple to do using collections functions, but this is more 
-      // performant. Check older commits for simpler version (da050fb6d1c317228cbcedeac9db91221d4565da)
+        // This is more simple to do using collections functions, but this is more 
+        // performant. Check older commits for simpler version 
+        // Jan 9, 2013 (da050fb6d1c317228cbcedeac9db91221d4565da)
         c.Expr(freshParamsTree).splice
         c.Expr(mapBuilderTree).splice // Defines val b = mapBuilder
         freshParams.splice.keySet.foreach { k => // Must use k or rename above
@@ -168,7 +113,7 @@ object Macros {
       }.tree
     }
     
-    def rparseDate(iname:c.Expr[String], params: c.Expr[ParamsTpe])   = reify { 
+    def rparseDate(iname:c.Expr[String], params: c.Expr[ParamsTpe])  = reify { 
       val name = iname.splice
       //(dtf.splice).parse(getArg(name,params.splice))
       new Date
@@ -178,15 +123,15 @@ object Macros {
       getInt(name.splice,params.splice(name.splice))
     }
     
-    def rparseLong(name:c.Expr[String], params: c.Expr[ParamsTpe])    = reify {
+    def rparseLong(name:c.Expr[String], params: c.Expr[ParamsTpe])   = reify {
       getLong(name.splice,params.splice(name.splice))
     }
     
-    def rparseFloat(name:c.Expr[String], params: c.Expr[ParamsTpe])    = reify {
+    def rparseFloat(name:c.Expr[String], params: c.Expr[ParamsTpe])  = reify {
       getFloat(name.splice,params.splice(name.splice))
     }
     
-    def rparseDouble(name:c.Expr[String], params: c.Expr[ParamsTpe])    = reify {
+    def rparseDouble(name:c.Expr[String], params: c.Expr[ParamsTpe]) = reify {
       getDouble(name.splice,params.splice(name.splice))
     }
     
@@ -197,21 +142,12 @@ object Macros {
     def rparseOption(tpe:Type,name:c.Expr[String], params: c.Expr[ParamsTpe]):Tree = {
       val TypeRef(_,_,List(argTpe)) = tpe
       reify{
-        try{  // Expr is of type argTpe
+        try{
           Some(c.Expr(buildObject(argTpe,name,params)).splice)
         } catch {
           case _: java.util.NoSuchElementException => None
         }
       }.tree
-      
-    }
-    
-    def getVars(tpe:Type):List[Symbol] = {
-      val ctorParams = tpe.member(nme.CONSTRUCTOR).asMethod.paramss.flatten.map(_.name.toTermName.toString.trim)
-      for{
-        sym <- tpe.members.filter(_.asTerm.isVar).toList
-        if !ctorParams.exists{sym.name.toTermName.toString.trim == _}
-      } yield sym
     }
     
     // The really heavyweight function. Most of the magic happens in the last else statement
@@ -237,23 +173,23 @@ object Macros {
       
         val TypeRef(_,sym:Symbol,tpeArgs:List[Type]) = tpe
         val ctorParams = tpe.member(nme.CONSTRUCTOR).asMethod.paramss
-        val (newParamsTerm,newParamsExpr,newProviderTree) = genFreshParams(name,params)
+        val (_,freshParams,freshParamsTree) = genFreshParams(name,params)
         
         val newObjTerm = newTermName(c.fresh("newObj$"))
         val newObjTypeTree = typeArgumentTree(tpe)
         val newObjTree = ValDef(Modifiers(),newObjTerm,newObjTypeTree,
+          // New(typeTree,List(List(params))
           New(newObjTypeTree,ctorParams.map{_.zipWithIndex.map { 
             case (pSym,index) =>
             // Change out the types if it has type parameters
             val pTpe = pSym.typeSignature.substituteTypes(sym.asClass.typeParams,tpeArgs)
-            //val compName = CONCAT(CONCAT(name,LIT(".")),LIT(pSym.name.decoded))
             val compName = LIT(pSym.name.decoded)
             // If param has defaults, try to find the val in map, or call 
             // default evaluation from its companion object
             if (pSym.asTerm.isParamWithDefault) {
               reify {
                 try {
-                  c.Expr(buildObject(pTpe, compName,newParamsExpr)).splice // splice in another obj tree
+                  c.Expr(buildObject(pTpe, compName,freshParams)).splice // splice in another obj tree
                 } catch {
                   case e: java.util.NoSuchElementException =>
                     // Need to use the origional symbol.companionObj to get defaults
@@ -263,13 +199,13 @@ object Macros {
                     ).splice
                 }
               }.tree
-            } else buildObject(pTpe, compName,newParamsExpr) // Required
+            } else buildObject(pTpe, compName,freshParams) // Required
             
-          }})    // Using the New(Tree,List(List(Tree))) constructor
+          }}) // Using the New(Tree,List(List(Tree))) constructor
         ) // newObjTree ValDef
         
-        // Here we generate the code for setting fields not in the constructor
-        val vars = getVars(tpe)
+        // Generate the code for setting fields not in the constructor
+        val vars = getNonConstructorVars(tpe)
         val setParamsBlocks = vars map { vari =>
           val varName = vari.name.toTermName.toString.trim
           reify{
@@ -277,7 +213,7 @@ object Macros {
             c.Expr(Assign(Select(Ident(newObjTerm),newTermName(varName)),
               buildObject(vari.typeSignature,
                 LIT(varName),
-                newParamsExpr
+                freshParams
               )
             )).splice
             } catch { // Don't care if they fail
@@ -286,7 +222,7 @@ object Macros {
           }.tree
         }
         
-        Block(newProviderTree::newObjTree::setParamsBlocks,Ident(newObjTerm))
+        Block(freshParamsTree::newObjTree::setParamsBlocks,Ident(newObjTerm))
       }
     }
     
