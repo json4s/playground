@@ -51,16 +51,15 @@ class WriterStack[T](var current:JsonWriter[T]) {
 object Serialization {
   type Writer = JsonWriter[_]
   
-  def asyncBuilder[U](obj:U,name:String, writer: Writer) = macro asyncimpl[U]
-  def asyncimpl[U:c.WeakTypeTag](c: Context)(obj: c.Expr[U], name:c.Expr[String],
-                      writer: c.Expr[Writer]):c.Expr[Unit] = {
+  def serObj[U](obj:U, name:String, writer: Writer) = macro impl[U]
+  def impl[U:c.WeakTypeTag](c: Context)(obj: c.Expr[U], name: c.Expr[String], writer: c.Expr[Writer]):c.Expr[Unit] = {
                       
     import c.universe._
     val helpers = new MacroHelpers[c.type](c)
     import helpers._
     
-    // Will help manage the JsonWriters for us instead of having to keep track
-    // as we go down the tree
+    // Will help manage the JsonWriters for us instead of having to
+    // keep track as we go down the tree
     val Block(writerStackDef::Nil,_) = reify{
       val writerStack = new WriterStack(writer.splice)
     }.tree
@@ -72,48 +71,96 @@ object Serialization {
                           typeOf[Byte]::typeOf[BigInt]::
                           typeOf[Short]::typeOf[BigDecimal]::Nil
     
-    // Writer should already be in startObject state
-    def dumpObject(tpe:Type,path:Tree,name:c.Expr[String]):c.Tree = {
+    
+    // Assumes that you are already in an object or list
+    def dumpObject(tpe:Type,path:Tree,name:c.Expr[String],isList:Boolean=false):c.Tree = {
       
-      val TypeRef(_,sym:Symbol,tpeArgs:List[Type]) = tpe
-      // get fields
-      val fields = getVars(tpe):::getVals(tpe)
-      val fieldTrees = fields map { pSym => 
-        val pTpe = pSym.typeSignature.substituteTypes(sym.asClass.typeParams,tpeArgs)
-        val fieldName = pSym.name.decoded.trim    // Do I need to trim here?
-        val fieldPath = Select(path,newTermName(fieldName))
+      val startFieldExpr = if(isList) {
+        reify{}
+      } else reify{writerStack.splice.startField(name.splice)}
+      
+      if(primativeTypes.exists(_ =:= tpe)) { // Must be primative
+        reify{
+          startFieldExpr.splice
+          writerStack.splice.primative(c.Expr(path).splice)
+        }.tree
+      } 
+      // Handle the lists
+      else if(tpe <:< typeOf[scala.collection.Seq[Any]]) {
+        val TypeRef(_,sym:Symbol,pTpe::Nil) = tpe
+        reify{
+          startFieldExpr.splice
+          writerStack.splice.startArray()
+          c.Expr[scala.collection.Seq[Any]](path).splice.foreach { i =>
+            c.Expr(dumpObject(pTpe,Ident("i"),LIT(""),isList=true)).splice
+          }
+          writerStack.splice.endArray()
+        }.tree
+      } 
+      
+      else if(tpe <:< typeOf[scala.collection.GenMap[Any,Any]].erasure) {
+        val TypeRef(_,_,keyTpe::valTpe::Nil) = tpe
         
-        
-        if(primativeTypes.contains(pTpe)) { // Must be primative
-          reify{
-            writerStack.splice.startField(LIT(fieldName).splice)
-            writerStack.splice.primative(c.Expr(fieldPath).splice)
-          }.tree
-        } else if(pTpe.erasure =:= typeOf[List[Any]]) {
-          EmptyTree   // TODO
-        } else if(pTpe.erasure =:= typeOf[Map[Any,Any]]) {
-          EmptyTree   // TODO
-        } else if(pTpe.erasure =:= typeOf[Option[Any]]) {
-          EmptyTree   // TODO
-        } else {
-          reify{
-            writerStack.splice.startField(LIT(fieldName).splice)
-            writerStack.splice.startObject()
-            c.Expr(dumpObject(pTpe,fieldPath,LIT(fieldName))).splice
-          }.tree
+        if(!primativeTypes.exists(_ =:= keyTpe)) {
+          c.abort(c.enclosingPosition,
+            s"Maps nees to have keys of primative type! Type: $keyTpe")
         }
-      }
+        val kExpr = c.Expr[String](Ident("kstr"))
+        reify{
+          startFieldExpr.splice
+          writerStack.splice.startObject()
+          c.Expr[scala.collection.GenMap[Any,Any]](path).splice.foreach { case (k,v) =>
+            val kstr = k.toString
+            c.Expr(dumpObject(valTpe,Ident("v"),kExpr)).splice
+          }
+          writerStack.splice.endObject()
+          
+        }.tree
+        
+      // Handle Options
+      } else if(tpe <:< typeOf[Option[Any]]) {
+        val TypeRef(_,sym:Symbol,pTpe::Nil) = tpe
+        reify{
+          c.Expr(path).splice match {
+            case Some(x) => c.Expr[Unit](dumpObject(pTpe,Ident("x"),name)).splice
+            case None    => Unit
+          }
+        }.tree
+      } 
       
-      // Return add all the blocks for each field and pop this obj off the stack
-      Block(fieldTrees,reify{writerStack.splice.endObject()}.tree)
-    }
+      else {  // Complex object
+        val TypeRef(_,sym:Symbol,tpeArgs:List[Type]) = tpe
+        // get fields
+        val fields = getVars(tpe):::getVals(tpe)
+        val fieldTrees = fields map { pSym => 
+          val pTpe = pSym.typeSignature.substituteTypes(sym.asClass.typeParams,tpeArgs)
+          val fieldName = pSym.name.decoded.trim    // Do I need to trim here?
+          val fieldPath = Select(path,newTermName(fieldName))
+          dumpObject(pTpe,fieldPath,LIT(fieldName))
+        }
+        
+        // Return add all the blocks for each field and pop this obj off the stack
+        Block(
+        reify{
+          startFieldExpr.splice
+          writerStack.splice.startObject()
+        }.tree::fieldTrees
+        ,reify{writerStack.splice.endObject()}.tree)
+      }
+    } // dumpObject
+    
     val code = Block(
-      writerStackDef::reify{
-        writerStack.splice.startObject()  // Does this do anything?
-      }.tree::dumpObject(weakTypeOf[U],obj.tree,name)::Nil,
+      writerStackDef::
+      reify{
+        writerStack.splice.startObject()
+      }.tree::
+      dumpObject(weakTypeOf[U],obj.tree,name)::
+      reify{
+        writerStack.splice.endObject()
+      }.tree::Nil,
       c.literalUnit.tree
     )
-    println(s"------------------ Debug: Generated Code ------------------\n $code")
+    //println(s"------------------ Debug: Generated Code ------------------\n $code")
     c.Expr[Unit](code)
   }
   
